@@ -1,0 +1,121 @@
+version: "3.4"
+
+services:
+  my-nginx-service:
+    image: nginx
+    container_name: my-nginx-service
+    ports:
+      - 8000:80
+    environment:
+      - FOO=bar
+    logging:
+      driver: loki
+      options:
+        loki-url: http://localhost:3100/loki/api/v1/push
+        loki-external-labels: job=dockerlogs,owner=ruan,environment=development
+
+  nginx:
+    image: nginx
+    container_name: nginx
+    ports:
+      - 4000:80
+    environment:
+      - FOO=bar
+    logging:
+      driver: loki
+      options:
+        loki-url: http://localhost:3100/loki/api/v1/push
+        loki-external-labels: job=dockerlogs,owner=ruan,environment=development
+
+# Interfaz grafica
+  grafana:
+    image: grafana/grafana:7.1.1
+    volumes:
+    - ./config/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml
+    #- ./config/grafana:/var/lib/grafana
+    ports:
+    - "3000:3000"
+    links:
+      - prometheus:prometheus
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=123456
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_DOMAIN=docker1.viziongps.net
+      #- GF_SMTP_ENABLED=true
+      #- GF_SMTP_HOST=smtp.gmail.com:587
+      #- GF_SMTP_USER=myadrress@gmail.com
+      #- GF_SMTP_PASSWORD=mypassword
+      #- GF_SMTP_FROM_ADDRESS=myaddress@gmail.com        
+
+# Logs Dockers
+  loki:
+   image: grafana/loki:v1.3.0
+   volumes:
+     - ./config/loki.yaml:/etc/config/loki.yaml
+   entrypoint:
+     - /usr/bin/loki
+     - -config.file=/etc/config/loki.yaml
+   ports:
+     - "3100:3100"
+
+# Logs sistema     
+  promtail:
+    image: grafana/promtail:1.5.0
+    volumes:
+      - /var/log:/var/log
+    command: -config.file=/etc/promtail/docker-config.yaml
+
+# Levanta metricas
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: monitoring_prometheus
+    #restart: unless-stopped
+    volumes:
+      - ./config/prometheus.yml:/etc/prometheus/prometheus.yml
+      #- ./config/prometheus/data:/prometheus
+    #command: -config.file=/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    expose:
+      - 9090
+    ports:
+      - 9090:9090
+    links:
+      - cadvisor:cadvisor
+      - node-exporter:node-exporter
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    #restart: unless-stopped
+    expose:
+      - 9100
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.ignored-mount-points=^/(sys|proc|dev|host|etc)($$|/)'      
+
+  cadvisor:
+    image: google/cadvisor:latest
+    container_name: cadvisor
+    #restart: unless-stopped
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:rw
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    expose:
+      - 8080
+    ports:
+      - 8080:8080
+    labels:
+      org.label-schema.group: "monitoring"      
